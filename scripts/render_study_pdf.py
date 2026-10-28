@@ -16,6 +16,8 @@ TOKEN = re.compile(r"(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$|\*\*[^*]+?\*\*|\[[^\]]+\]\([
 QUESTION = re.compile(r"^\*\*((?:[A-Z]\d+|题\s*\d+|练习\s*\d+|\d+))[.．:：]\*\*\s*(.*)$")
 HEADING = re.compile(r"^(#{1,3})\s+(.*)$")
 ORDERED = re.compile(r"^\d+\.\s+(.*)$")
+# ![替代文字](文件名.png) —— 单独成行的图片引用，用于把错题重做纸放进 PDF
+IMAGE = re.compile(r'^!\[([^\]]*)\]\(([^)\s]+)\)\s*$')
 
 
 def escape_tex(text: str) -> str:
@@ -58,6 +60,24 @@ def inline(text: str) -> str:
         end = match.end()
     result.append(escape_tex(text[end:]))
     return "".join(result)
+
+
+def image_tex(name: str, alt: str = "") -> str:
+    """A standalone `![说明](图.png)` line becomes a full-width figure.
+
+    Only the file name is written into the TeX: compile_study_pdf.py copies that
+    file into the build directory, so directories with Chinese characters never
+    reach the LaTeX engine.
+    """
+    file = Path(name).name
+    caption = escape_tex(alt.strip())
+    body = (
+        r"\begin{figure}[htbp]\centering"
+        r"\includegraphics[width=\linewidth,height=0.86\textheight,keepaspectratio]{" + file + r"}"
+    )
+    if caption:
+        body += r"\par\smallskip{\small " + caption + "}"
+    return body + r"\end{figure}"
 
 
 def table_tex(lines: list[str], kind: str) -> str:
@@ -145,6 +165,13 @@ def body_tex(markdown: str, kind: str, layout: str) -> str:
                 rows.append(lines[i].strip())
                 i += 1
             out.append(table_tex(rows, kind))
+            continue
+        image = IMAGE.match(line)
+        if image:
+            flush_paragraph()
+            close_list()
+            out.append(image_tex(image.group(2), image.group(1)))
+            i += 1
             continue
         if line.startswith("$$"):
             flush_paragraph()
@@ -339,7 +366,7 @@ def map_tex(info: dict, kind: str) -> str:
 
 PREAMBLE = r"""\documentclass[UTF8,a4paper,11pt]{ctexart}
 \usepackage[margin=22mm,headheight=14pt,footskip=12mm]{geometry}
-\usepackage{amsmath,amssymb,array,longtable,booktabs,tikz,needspace,enumitem,fancyhdr,hyperref}
+\usepackage{amsmath,amssymb,array,longtable,booktabs,tikz,needspace,enumitem,fancyhdr,hyperref,graphicx}
 \usepackage{microtype}
 \hypersetup{colorlinks=false,pdfborder={0 0 0},pdfauthor={Good Learning},bookmarks=false}
 \newfontfamily\circledfont{Segoe UI Symbol}
