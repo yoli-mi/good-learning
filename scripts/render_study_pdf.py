@@ -118,6 +118,8 @@ def body_tex(markdown: str, kind: str, layout: str) -> str:
     list_kind: str | None = None
     in_exercises = False
     error_seen = False
+    day_unit_seen = False
+    day_answers = False
 
     def flush_paragraph() -> None:
         if paragraph:
@@ -135,6 +137,11 @@ def body_tex(markdown: str, kind: str, layout: str) -> str:
         line = lines[i].strip()
         if not line:
             flush_paragraph()
+            i += 1
+            continue
+        if kind == "day" and re.fullmatch(r"(?:-{3,}|\*{3,}|_{3,})", line):
+            flush_paragraph()
+            close_list()
             i += 1
             continue
         if line.startswith("|"):
@@ -165,7 +172,15 @@ def body_tex(markdown: str, kind: str, layout: str) -> str:
             close_list()
             level, title = len(heading.group(1)), heading.group(2)
             if kind in ("day", "errors"):
-                if level == 2 and re.match(r"单元\s*\d", title):
+                if level == 2 and re.match(r"单元\s*(?:\d|[一二三四五六七八九十])", title) and kind == "day":
+                    if day_unit_seen:
+                        out.append(r"\par\Needspace{6\baselineskip}\vspace{1em}\noindent\rule{\linewidth}{.4pt}\par")
+                    else:
+                        out.append(r"\clearpage")
+                    day_unit_seen = True
+                    day_answers = False
+                    in_exercises = False
+                elif level == 2 and re.match(r"单元\s*\d", title):
                     out.append(r"\clearpage")
                     in_exercises = False
                 elif kind == "errors" and level == 2 and re.match(r"错题\s*\d", title):
@@ -173,17 +188,22 @@ def body_tex(markdown: str, kind: str, layout: str) -> str:
                         out.append(r"\clearpage")
                     error_seen = True
                     in_exercises = False
-                elif level == 3 and "举一反三" in title:
+                elif level == 3 and "举一反三" in title and not (kind == "day" and day_answers):
                     in_exercises = True
                 elif kind == "errors" and level == 3 and "再做一题" in title:
                     in_exercises = True
-                elif level == 2 and re.search(r"独立练习|练习题|自主练习|巩固练习", title):
+                elif kind == "day" and level == 2 and "答案" in title:
+                    day_answers = True
+                    in_exercises = False
                     out.append(r"\clearpage")
+                elif level == 2 and re.search(r"独立练习|练习题|自主练习|巩固练习", title):
+                    if kind != "day":
+                        out.append(r"\clearpage")
                     in_exercises = True
                 elif level == 2 and "答案" in title:
                     in_exercises = False
                     out.append(r"\clearpage")
-                elif level == 3 and "混合题答案" in title:
+                elif kind == "errors" and level == 3 and "混合题答案" in title:
                     out.append(r"\clearpage")
                 elif level == 2:
                     in_exercises = False
@@ -364,11 +384,8 @@ subsection={format=\large\bfseries\sffamily,beforeskip=1em,afterskip=.45em}}
 
 def render(source: Path, output: Path, kind: str, layout: str, map_info: dict) -> None:
     markdown = source.read_text(encoding="utf-8")
-    cover = dict(map_info)
-    if kind == "day":
-        cover["title"] += "（宽松排版型）" if layout == "loose" else "（紧凑排版型）"
     list_style = r"\setlist[enumerate]{label=\arabic*）}" if kind == "errors" else ""
-    cover_tex = "" if kind == "errors" else map_tex(cover, kind) + "\n"
+    cover_tex = "" if kind in ("day", "errors") else map_tex(map_info, kind) + "\n"
     tex = PREAMBLE + cover_tex + list_style + "\n" + body_tex(markdown, kind, layout) + "\n\\end{document}\n"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(tex, encoding="utf-8")
@@ -382,8 +399,8 @@ def main() -> None:
     parser.add_argument("--layout", choices=["compact", "loose"], default="compact")
     parser.add_argument("--map-config", type=Path)
     args = parser.parse_args()
-    config = json.loads(args.map_config.read_text(encoding="utf-8")) if args.map_config else {}
-    if args.kind != "errors" and args.kind not in config:
+    config = json.loads(args.map_config.read_text(encoding="utf-8")) if args.map_config and args.kind != "day" else {}
+    if args.kind in ("knowledge", "plan") and args.kind not in config:
         parser.error("--map-config must contain the selected document kind")
     render(args.source, args.output, args.kind, args.layout, config.get(args.kind, {}))
 
